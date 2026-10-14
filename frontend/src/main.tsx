@@ -2,9 +2,9 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
-import { strings } from './strings'
+import { messages } from './messages'
 
-document.title = strings.app.documentTitle
+document.title = messages.app.documentTitle
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

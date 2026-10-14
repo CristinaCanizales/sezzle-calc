@@ -1,7 +1,7 @@
 /**
  * All user-facing text lives here so copy changes happen in one place.
  *
- * To localize, add another object of type `Strings` (e.g. `es`) and select it
+ * To localize, add another object of type `Messages` (e.g. `es`) and select it
  * at startup; the type makes missing translations a compile error. A library
  * such as react-i18next can replace this once runtime language switching or
  * pluralization is needed.
@@ -10,6 +10,7 @@ const en = {
   app: {
     documentTitle: 'Calculator',
     logo: 'calc',
+    sezzleLogoAlt: 'Sezzle',
     title: 'Quick math, no surprises.',
     subtitle: 'A simple calculator powered by a Go API.',
   },
@@ -58,12 +59,12 @@ const en = {
   },
 }
 
-export type Strings = typeof en
+export type Messages = typeof en
 
-export const strings: Strings = en
+export const messages: Messages = en
 
 /** Localized text for an API error code, falling back to a generic message. */
 export function getErrorMessage(code: string): string {
-  const messages: Partial<Record<string, string>> = strings.errors
-  return messages[code] ?? strings.errors.fallback
+  const byCode: Partial<Record<string, string>> = messages.errors
+  return byCode[code] ?? messages.errors.fallback
 }

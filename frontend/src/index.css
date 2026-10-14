@@ -44,6 +44,18 @@ body {
   padding: 20px 24px;
 }
 
+.header__brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header__sezzle {
+  display: block;
+  height: 28px;
+  width: auto;
+}
+
 .header__logo {
   font-size: 1.6rem;
   font-weight: 800;

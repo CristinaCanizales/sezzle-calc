@@ -1,5 +1,5 @@
 import type { CalculatorAction } from '../calculator/calculatorReducer'
-import { strings } from '../strings'
+import { messages } from '../messages'
 
 type KeyVariant = 'digit' | 'function' | 'operator' | 'equals'
 
@@ -13,7 +13,7 @@ interface KeyConfig {
   className?: string
 }
 
-type NamedKey = keyof typeof strings.keys
+type NamedKey = keyof typeof messages.keys
 
 const named = (
   id: NamedKey,
@@ -21,7 +21,7 @@ const named = (
   action: CalculatorAction,
   variant: KeyVariant,
   className?: string,
-): KeyConfig => ({ id, ...strings.keys[id], shortcut, action, variant, className })
+): KeyConfig => ({ id, ...messages.keys[id], shortcut, action, variant, className })
 
 // Digits are universal, so they need no text entry or aria-label.
 const digit = (d: string, className?: string): KeyConfig => ({
@@ -66,7 +66,7 @@ interface KeypadProps {
 
 export function Keypad({ onPress }: KeypadProps) {
   return (
-    <div className="keypad" role="group" aria-label={strings.calculator.keypadLabel}>
+    <div className="keypad" role="group" aria-label={messages.calculator.keypadLabel}>
       {KEYS.map((key) => (
         <button
           key={key.id}

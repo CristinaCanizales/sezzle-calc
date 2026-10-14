@@ -1,4 +1,4 @@
-import { strings } from '../strings'
+import { messages } from '../messages'
 
 const EVALUATE_URL = '/api/v1/evaluate'
 
@@ -34,7 +34,7 @@ export async function evaluate(expression: string, signal?: AbortSignal): Promis
     })
   } catch (err) {
     if (signal?.aborted) throw err
-    throw new ApiError('NETWORK_ERROR', strings.errors.NETWORK_ERROR)
+    throw new ApiError('NETWORK_ERROR', messages.errors.NETWORK_ERROR)
   }
 
   const body: unknown = await response.json().catch(() => null)
@@ -45,5 +45,5 @@ export async function evaluate(expression: string, signal?: AbortSignal): Promis
   if (isErrorBody(body)) {
     throw new ApiError(body.error.code, body.error.message)
   }
-  throw new ApiError('UNEXPECTED_RESPONSE', strings.errors.fallback)
+  throw new ApiError('UNEXPECTED_RESPONSE', messages.errors.fallback)
 }

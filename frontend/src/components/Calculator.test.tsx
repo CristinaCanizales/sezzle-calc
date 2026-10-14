@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, evaluate } from '../api/calculatorClient'
-import { strings } from '../strings'
+import { messages } from '../messages'
 import { Calculator } from './Calculator'
 
 vi.mock('../api/calculatorClient', async (importOriginal) => ({
@@ -10,7 +10,7 @@ vi.mock('../api/calculatorClient', async (importOriginal) => ({
   evaluate: vi.fn(),
 }))
 
-type KeyId = keyof typeof strings.keys
+type KeyId = keyof typeof messages.keys
 
 const mockedEvaluate = vi.mocked(evaluate)
 
@@ -26,7 +26,7 @@ const SERVER_RESULTS: Record<string, number> = {
 }
 
 async function fakeBackend(expression: string): Promise<number> {
-  // The server's English message must not reach the UI; text comes from strings.ts.
+  // The server's English message must not reach the UI; text comes from messages.ts.
   if (expression === '5 / 0') throw new ApiError('DIVISION_BY_ZERO', 'server message')
   if (expression in SERVER_RESULTS) return SERVER_RESULTS[expression]
   throw new Error(`Unexpected expression in test: "${expression}"`)
@@ -35,14 +35,14 @@ async function fakeBackend(expression: string): Promise<number> {
 function setup() {
   const user = userEvent.setup()
   render(<Calculator />)
-  /** Clicks keys by digit or by their id in strings.keys (e.g. 'add'). */
+  /** Clicks keys by digit or by their id in messages.keys (e.g. 'add'). */
   const press = async (...ids: (KeyId | string)[]) => {
     for (const id of ids) {
-      const name = id in strings.keys ? strings.keys[id as KeyId].ariaLabel : id
+      const name = id in messages.keys ? messages.keys[id as KeyId].ariaLabel : id
       await user.click(screen.getByRole('button', { name }))
     }
   }
-  const display = () => screen.getByRole('status', { name: strings.calculator.displayLabel })
+  const display = () => screen.getByRole('status', { name: messages.calculator.displayLabel })
   return { user, press, display }
 }
 
@@ -106,7 +106,7 @@ describe('Calculator', () => {
     const { press, display } = setup()
 
     await press('5', 'divide', '0', 'equals')
-    await waitFor(() => expect(display()).toHaveTextContent(strings.errors.DIVISION_BY_ZERO))
+    await waitFor(() => expect(display()).toHaveTextContent(messages.errors.DIVISION_BY_ZERO))
     expect(screen.getByText('5 ÷ 0')).toBeInTheDocument()
 
     await press('backspace', '2', 'equals')
@@ -114,12 +114,12 @@ describe('Calculator', () => {
   })
 
   it('shows a friendly message when the server is unreachable', async () => {
-    mockedEvaluate.mockRejectedValue(new ApiError('NETWORK_ERROR', strings.errors.NETWORK_ERROR))
+    mockedEvaluate.mockRejectedValue(new ApiError('NETWORK_ERROR', messages.errors.NETWORK_ERROR))
     const { press, display } = setup()
 
     await press('1', 'add', '1', 'equals')
 
-    await waitFor(() => expect(display()).toHaveTextContent(strings.errors.NETWORK_ERROR))
+    await waitFor(() => expect(display()).toHaveTextContent(messages.errors.NETWORK_ERROR))
   })
 
   describe('physical keyboard', () => {

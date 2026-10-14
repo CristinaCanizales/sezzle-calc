@@ -74,7 +74,7 @@ frontend/src/
   calculator/keyboard.ts           Maps keyboard keys to calculator actions
   components/                      Calculator, Display, Keypad
   utils/format.ts                  Result formatting / float rounding
-  strings.ts                       All user-facing text (labels, aria-labels, error messages)
+  messages.ts                       All user-facing text (labels, aria-labels, error messages)
 docker-compose.yml                 backend (distroless) + frontend (nginx, proxies /api)
 ```
 
@@ -235,7 +235,7 @@ curl -s -X POST http://localhost:8080/api/v1/calculate \
 - **Go standard library only.** `net/http` from Go 1.22 is enough for three routes. The middleware covers panic recovery and structured request logging (`log/slog`). The server has timeouts and shuts down gracefully on SIGTERM.
 - **The keypad is a pure reducer.** `calculatorReducer.ts` turns key presses into API-ready tokens. The input rules (implicit `×`, valid positions for signs, `√` before or after its operand, auto-closing parentheses) prevent most invalid expressions, but the server still validates everything. The reducer has no side effects: pressing `=` sets `state.request`, and the `useCalculator` hook sends it and dispatches the result back. This lets almost all frontend behavior be tested without rendering or mocks.
 - **Keyboard and on-screen keys use the same actions.** `keyboard.ts` maps keys to the same reducer actions as the buttons. `preventDefault` stops `Enter` from also clicking whichever button has focus.
-- **All user-facing text is in `strings.ts`.** Labels, accessible names, keyboard hints and error messages live in one typed object. A translation is just another object of the same `Strings` type, and a missing key is a compile error. The UI picks error text by the API's `code` rather than showing the server's English `message`, so errors can be translated too.
+- **All user-facing text is in `messages.ts`.** Labels, accessible names, keyboard hints and error messages live in one typed object. A translation is just another object of the same `Messages` type, and a missing key is a compile error. The UI picks error text by the API's `code` rather than showing the server's English `message`, so errors can be translated too.
 - **No CORS setup.** The browser always calls `/api/...` on its own origin. Vite's dev proxy forwards it in development, and nginx forwards it in Docker.
 - **Minimal dependencies.** No UI kit, state library or CSS framework. The Docker images are a distroless static Go image (non-root, about 10 MB) and nginx serving the built frontend.
 

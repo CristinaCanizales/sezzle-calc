@@ -1,13 +1,17 @@
+import sezzleLogo from './assets/sezzle-logo.svg'
 import { Calculator } from './components/Calculator'
-import { strings } from './strings'
+import { messages } from './messages'
 
 export default function App() {
-  const { app, shortcuts } = strings
+  const { app, shortcuts } = messages
 
   return (
     <div className="page">
       <header className="header">
-        <span className="header__logo">{app.logo}</span>
+        <div className="header__brand">
+          <img className="header__sezzle" src={sezzleLogo} alt={app.sezzleLogoAlt} />
+          <span className="header__logo">{app.logo}</span>
+        </div>
       </header>
       <main className="main">
         <h1 className="title">{app.title}</h1>

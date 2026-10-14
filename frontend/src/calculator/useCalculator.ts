@@ -1,6 +1,6 @@
 import { useEffect, useReducer } from 'react'
 import { ApiError, evaluate } from '../api/calculatorClient'
-import { getErrorMessage } from '../strings'
+import { getErrorMessage } from '../messages'
 import { calculatorReducer, getDisplay, getExpression, initialState } from './calculatorReducer'
 import { keyToAction } from './keyboard'
 
@@ -19,7 +19,7 @@ export function useCalculator() {
       })
       .catch((err: unknown) => {
         if (controller.signal.aborted) return
-        // Text comes from strings.ts by error code so it can be localized.
+        // Text comes from messages.ts by error code so it can be localized.
         const message = getErrorMessage(err instanceof ApiError ? err.code : '')
         dispatch({ type: 'requestFailed', message })
       })
