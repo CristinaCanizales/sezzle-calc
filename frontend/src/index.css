@@ -224,6 +224,13 @@ body {
   text-align: center;
 }
 
+.shortcuts__group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 14px;
+}
+
 kbd {
   padding: 1px 6px;
   border: 1px solid var(--lavender-strong);

@@ -71,6 +71,7 @@ frontend/src/
   calculator/keyboard.ts         Maps keyboard keys to calculator actions
   components/                    Calculator, Display, Keypad
   utils/format.ts                Result formatting / float rounding
+  strings.ts                     All user-facing text (labels, aria-labels, error messages)
 docker-compose.yml               backend (distroless) + frontend (nginx, proxies /api)
 ```
 
@@ -183,6 +184,7 @@ curl -s -X POST http://localhost:8080/api/v1/calculate \
 - **Go standard library only.** Go 1.22's `net/http` is enough for two routes. The middleware covers panic recovery and structured request logging (`log/slog`). The server has timeouts and shuts down gracefully on SIGTERM.
 - **The keypad is a pure reducer.** All key-press logic is in `calculatorReducer.ts`, which has no side effects. A key that needs a calculation sets `state.request`, and the `useCalculator` hook sends it and dispatches the result back. Almost all frontend behavior can therefore be tested without rendering or mocks. Key presses are ignored while a request is in flight, which avoids race conditions.
 - **Keyboard and on-screen keys use the same actions.** `keyboard.ts` maps keys to the same reducer actions as the buttons. `preventDefault` stops `Enter` from also clicking whichever button has focus.
+- **All user-facing text is in `strings.ts`.** Labels, accessible names, keyboard hints and error messages live in one typed object, so copy changes are made in one place and a translation is just another object of the same `Strings` type (a missing key is a compile error). The UI picks error text by the API's `code` rather than showing the server's English `message`, so errors can be translated too. A library such as react-i18next would only be worth adding once the app needs runtime language switching or plural rules.
 - **No CORS setup.** The browser always calls `/api/...` on its own origin. Vite's dev proxy forwards it in development, and nginx forwards it in Docker.
 - **Minimal dependencies.** No UI kit, state library or CSS framework: plain CSS with custom properties covers this UI. The Docker images are a distroless static Go image (non-root, about 10 MB) and nginx serving the built frontend.
 

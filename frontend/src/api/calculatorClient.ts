@@ -1,3 +1,4 @@
+import { strings } from '../strings'
 import type { CalculateRequest } from '../types'
 
 const CALCULATE_URL = '/api/v1/calculate'
@@ -33,7 +34,7 @@ export async function calculate(request: CalculateRequest, signal?: AbortSignal)
     })
   } catch (err) {
     if (signal?.aborted) throw err
-    throw new ApiError('NETWORK_ERROR', "Can't reach the server. Please try again.")
+    throw new ApiError('NETWORK_ERROR', strings.errors.NETWORK_ERROR)
   }
 
   const body: unknown = await response.json().catch(() => null)
@@ -44,5 +45,5 @@ export async function calculate(request: CalculateRequest, signal?: AbortSignal)
   if (isErrorBody(body)) {
     throw new ApiError(body.error.code, body.error.message)
   }
-  throw new ApiError('UNEXPECTED_RESPONSE', 'Something went wrong. Please try again.')
+  throw new ApiError('UNEXPECTED_RESPONSE', strings.errors.fallback)
 }

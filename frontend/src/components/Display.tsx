@@ -1,3 +1,5 @@
+import { strings } from '../strings'
+
 interface DisplayProps {
   expression: string
   value: string
@@ -20,7 +22,7 @@ export function Display({ expression, value, error, loading }: DisplayProps) {
       <output
         className={`display__value ${error ? 'display__value--error' : sizeClass(value)}`}
         aria-live="polite"
-        aria-label="Display"
+        aria-label={strings.calculator.displayLabel}
       >
         {error ?? value}
       </output>

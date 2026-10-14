@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { strings } from '../strings'
 import { ApiError, calculate } from './calculatorClient'
 
 function mockFetch(impl: () => Promise<Response>) {
@@ -45,7 +46,7 @@ describe('calculate', () => {
 
     await expect(calculate({ operation: 'sqrt', a: 4 })).rejects.toMatchObject({
       code: 'NETWORK_ERROR',
-      message: "Can't reach the server. Please try again.",
+      message: strings.errors.NETWORK_ERROR,
     })
   })
 
