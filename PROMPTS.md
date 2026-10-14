@@ -87,22 +87,3 @@ When asked about setup, I chose to install Go with winget, and to write the Dock
 > we can include that as well, that was an intentional change. Though I'd like strings to be renamed to something more representative
 
 *Result:* `strings.ts` was renamed to `messages.ts`, the usual term in i18n libraries, and committed together with the logo and the new screenshots.
-
-## 9. Checking the deliverables
-
-> Git repository with frontend and backend code
-> README with setup instructions, API examples, and design decisions
-> Unit tests and coverage report
-> Optional: Dockerfile to run frontend + backend together
->
-> those are the deliverables. can you make sure we have everything?
-
-*Result:* coverage reports for both the backend and the frontend, documented in the README, plus a test for the page shell.
-
-## 10. Push
-
-> the app runs fine from localhost 3000. push pending commits
-
-## 11. Documentation pass and this file
-
-> can you make sure all decisions and current behavior is reflected in readme and right documentation? And also create a .md file with the prompts I used to create this project
