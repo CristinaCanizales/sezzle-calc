@@ -1,7 +1,6 @@
 import { strings } from '../strings'
-import type { CalculateRequest } from '../types'
 
-const CALCULATE_URL = '/api/v1/calculate'
+const EVALUATE_URL = '/api/v1/evaluate'
 
 /** Every failure from the client is normalized to this type so the UI has one case to handle. */
 export class ApiError extends Error {
@@ -23,13 +22,14 @@ function isErrorBody(body: unknown): body is ErrorBody {
   return typeof error?.code === 'string' && typeof error?.message === 'string'
 }
 
-export async function calculate(request: CalculateRequest, signal?: AbortSignal): Promise<number> {
+/** Evaluates an arithmetic expression such as "2 + 3 * 4" on the server. */
+export async function evaluate(expression: string, signal?: AbortSignal): Promise<number> {
   let response: Response
   try {
-    response = await fetch(CALCULATE_URL, {
+    response = await fetch(EVALUATE_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
+      body: JSON.stringify({ expression }),
       signal,
     })
   } catch (err) {

@@ -8,6 +8,7 @@ interface DisplayProps {
 }
 
 function sizeClass(text: string): string {
+  if (text.length > 22) return 'display__value--xsmall'
   if (text.length > 13) return 'display__value--small'
   if (text.length > 9) return 'display__value--medium'
   return ''

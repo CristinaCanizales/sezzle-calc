@@ -1,34 +1,34 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, calculate } from '../api/calculatorClient'
+import { ApiError, evaluate } from '../api/calculatorClient'
 import { strings } from '../strings'
-import type { CalculateRequest } from '../types'
 import { Calculator } from './Calculator'
 
 vi.mock('../api/calculatorClient', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../api/calculatorClient')>()),
-  calculate: vi.fn(),
+  evaluate: vi.fn(),
 }))
 
 type KeyId = keyof typeof strings.keys
 
-const mockedCalculate = vi.mocked(calculate)
+const mockedEvaluate = vi.mocked(evaluate)
 
-// A stand-in for the backend so tests read as user-visible behavior.
-async function fakeBackend({ operation, a, b = 0 }: CalculateRequest): Promise<number> {
-  switch (operation) {
-    case 'add': return a + b
-    case 'subtract': return a - b
-    case 'multiply': return a * b
-    case 'divide':
-      // The server's English message must not reach the UI; text comes from strings.ts.
-      if (b === 0) throw new ApiError('DIVISION_BY_ZERO', 'server message')
-      return a / b
-    case 'power': return a ** b
-    case 'sqrt': return Math.sqrt(a)
-    case 'percentage': return a / 100
-  }
+// Canned server answers keyed by the exact expression the UI sends.
+const SERVER_RESULTS: Record<string, number> = {
+  '2 + 3 * 4': 14,
+  '( 2 + 3 ) * 4': 20,
+  'sqrt 9 + 1': 4,
+  '14 * 2': 28,
+  '12 * 3': 36,
+  '5 / 2': 2.5,
+}
+
+async function fakeBackend(expression: string): Promise<number> {
+  // The server's English message must not reach the UI; text comes from strings.ts.
+  if (expression === '5 / 0') throw new ApiError('DIVISION_BY_ZERO', 'server message')
+  if (expression in SERVER_RESULTS) return SERVER_RESULTS[expression]
+  throw new Error(`Unexpected expression in test: "${expression}"`)
 }
 
 function setup() {
@@ -46,53 +46,65 @@ function setup() {
 }
 
 beforeEach(() => {
-  mockedCalculate.mockReset()
-  mockedCalculate.mockImplementation(fakeBackend)
+  mockedEvaluate.mockReset()
+  mockedEvaluate.mockImplementation(fakeBackend)
 })
 
 describe('Calculator', () => {
-  it('calculates a basic expression from keypad clicks', async () => {
+  it('evaluates with operator precedence', async () => {
     const { press, display } = setup()
 
-    await press('1', '2', 'add', '3', 'equals')
+    await press('2', 'add', '3', 'multiply', '4')
+    expect(display()).toHaveTextContent('2 + 3 × 4')
+    await press('equals')
 
-    await waitFor(() => expect(display()).toHaveTextContent('15'))
-    expect(screen.getByText('12 + 3 =')).toBeInTheDocument()
-    expect(mockedCalculate).toHaveBeenCalledWith({ operation: 'add', a: 12, b: 3 }, expect.any(AbortSignal))
+    await waitFor(() => expect(display()).toHaveTextContent(/^14$/))
+    expect(screen.getByText('2 + 3 × 4 =')).toBeInTheDocument()
+    expect(mockedEvaluate).toHaveBeenCalledOnce()
+    expect(mockedEvaluate).toHaveBeenCalledWith('2 + 3 * 4', expect.any(AbortSignal))
   })
 
-  it('chains operations left to right', async () => {
+  it('supports parentheses', async () => {
     const { press, display } = setup()
 
-    await press('2', 'add', '3', 'multiply')
-    await waitFor(() => expect(display()).toHaveTextContent('5'))
-    await press('4', 'equals')
+    await press('openParen', '2', 'add', '3', 'closeParen', 'multiply', '4', 'equals')
 
-    await waitFor(() => expect(display()).toHaveTextContent('20'))
-    expect(mockedCalculate).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(display()).toHaveTextContent(/^20$/))
   })
 
-  it('applies unary operations immediately', async () => {
+  it('supports square root in an expression', async () => {
     const { press, display } = setup()
 
-    await press('9', 'sqrt')
+    await press('sqrt', '9', 'add', '1')
+    expect(display()).toHaveTextContent('√9 + 1')
+    await press('equals')
 
-    await waitFor(() => expect(display()).toHaveTextContent('3'))
-    expect(mockedCalculate).toHaveBeenCalledWith({ operation: 'sqrt', a: 9 }, expect.any(AbortSignal))
+    await waitFor(() => expect(display()).toHaveTextContent(/^4$/))
   })
 
-  it('shows the localized message for server errors and recovers on the next number', async () => {
+  it('continues from a result', async () => {
+    const { press, display } = setup()
+
+    await press('2', 'add', '3', 'multiply', '4', 'equals')
+    await waitFor(() => expect(display()).toHaveTextContent(/^14$/))
+    await press('multiply', '2', 'equals')
+
+    await waitFor(() => expect(display()).toHaveTextContent(/^28$/))
+  })
+
+  it('shows the localized error and keeps the expression for editing', async () => {
     const { press, display } = setup()
 
     await press('5', 'divide', '0', 'equals')
     await waitFor(() => expect(display()).toHaveTextContent(strings.errors.DIVISION_BY_ZERO))
+    expect(screen.getByText('5 ÷ 0')).toBeInTheDocument()
 
-    await press('4')
-    expect(display()).toHaveTextContent('4')
+    await press('backspace', '2', 'equals')
+    await waitFor(() => expect(display()).toHaveTextContent(/^2\.5$/))
   })
 
   it('shows a friendly message when the server is unreachable', async () => {
-    mockedCalculate.mockRejectedValue(new ApiError('NETWORK_ERROR', strings.errors.NETWORK_ERROR))
+    mockedEvaluate.mockRejectedValue(new ApiError('NETWORK_ERROR', strings.errors.NETWORK_ERROR))
     const { press, display } = setup()
 
     await press('1', 'add', '1', 'equals')
@@ -101,23 +113,23 @@ describe('Calculator', () => {
   })
 
   describe('physical keyboard', () => {
-    it('supports typing an expression and pressing Enter', async () => {
+    it('supports typing an expression with parentheses and pressing Enter', async () => {
       const { user, display } = setup()
 
-      await user.keyboard('12*3{Enter}')
+      await user.keyboard('(2+3)*4{Enter}')
 
-      await waitFor(() => expect(display()).toHaveTextContent('36'))
-      expect(mockedCalculate).toHaveBeenCalledWith({ operation: 'multiply', a: 12, b: 3 }, expect.any(AbortSignal))
+      await waitFor(() => expect(display()).toHaveTextContent(/^20$/))
+      expect(mockedEvaluate).toHaveBeenCalledWith('( 2 + 3 ) * 4', expect.any(AbortSignal))
     })
 
     it('supports Backspace and Escape', async () => {
       const { user, display } = setup()
 
       await user.keyboard('123{Backspace}')
-      expect(display()).toHaveTextContent('12')
+      expect(display()).toHaveTextContent(/^12$/)
 
       await user.keyboard('{Escape}')
-      expect(display()).toHaveTextContent('0')
+      expect(display()).toHaveTextContent(/^0$/)
     })
 
     it('does not also activate a focused keypad button when pressing Enter', async () => {
@@ -127,7 +139,7 @@ describe('Calculator', () => {
       await user.keyboard('{Enter}')
 
       expect(display()).toHaveTextContent(/^5$/)
-      expect(mockedCalculate).not.toHaveBeenCalled()
+      expect(mockedEvaluate).not.toHaveBeenCalled()
     })
   })
 })

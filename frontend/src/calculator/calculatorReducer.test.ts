@@ -1,162 +1,208 @@
 import { describe, expect, it } from 'vitest'
+import type { Operator } from '../types'
 import {
   calculatorReducer,
+  getDisplay,
   getExpression,
   initialState,
   MAX_DIGITS,
+  MAX_EXPRESSION_LENGTH,
   type CalculatorAction,
   type CalculatorState,
 } from './calculatorReducer'
 
-const digit = (d: string): CalculatorAction => ({ type: 'digit', digit: d })
-const decimal: CalculatorAction = { type: 'decimal' }
-const add: CalculatorAction = { type: 'binaryOperator', op: 'add' }
-const multiply: CalculatorAction = { type: 'binaryOperator', op: 'multiply' }
-const equals: CalculatorAction = { type: 'equals' }
-const succeed = (result: number): CalculatorAction => ({ type: 'requestSucceeded', result })
-
-/** Applies actions in order; a string is shorthand for typing its characters. */
-function press(...inputs: (CalculatorAction | string)[]): CalculatorState {
-  return inputs.reduce<CalculatorState>((state, input) => {
-    if (typeof input !== 'string') return calculatorReducer(state, input)
-    return [...input].reduce(
-      (s, ch) => calculatorReducer(s, ch === '.' ? decimal : digit(ch)),
-      state,
-    )
-  }, initialState)
+const SHORTHAND: Record<string, CalculatorAction> = {
+  '.': { type: 'decimal' },
+  '(': { type: 'openParen' },
+  ')': { type: 'closeParen' },
+  '√': { type: 'sqrt' },
+  '%': { type: 'percent' },
+  '=': { type: 'equals' },
+  '<': { type: 'backspace' },
+  C: { type: 'clear' },
+  ...Object.fromEntries(['+', '-', '*', '/', '^'].map((op) => [op, { type: 'operator', op: op as Operator }])),
 }
 
+/** Types keys from a compact string, e.g. "2+3*4=" ("<" is backspace, "C" is clear). */
+function type(keys: string, state: CalculatorState = initialState): CalculatorState {
+  return [...keys].reduce((s, key) => {
+    const action = /\d/.test(key) ? { type: 'digit' as const, digit: key } : SHORTHAND[key]
+    return calculatorReducer(s, action)
+  }, state)
+}
+
+const succeed = (state: CalculatorState, result: number) =>
+  calculatorReducer(state, { type: 'requestSucceeded', result })
+
 describe('number entry', () => {
-  it('starts at 0 and replaces the leading zero', () => {
-    expect(initialState.display).toBe('0')
-    expect(press('007').display).toBe('7')
+  it('shows 0 when empty and replaces a leading zero', () => {
+    expect(getDisplay(initialState)).toBe('0')
+    expect(getDisplay(type('007'))).toBe('7')
   })
 
-  it('allows only one decimal point', () => {
-    expect(press('1.2.3').display).toBe('1.23')
+  it('allows one decimal point per number and prefixes a bare point with 0', () => {
+    expect(getDisplay(type('1.2.3'))).toBe('1.23')
+    expect(getDisplay(type('.5+.5'))).toBe('0.5 + 0.5')
   })
 
-  it('prefixes a leading decimal point with 0', () => {
-    expect(press('.5').display).toBe('0.5')
+  it(`limits each number to ${MAX_DIGITS} digits`, () => {
+    expect(getDisplay(type('1234567890123456789'))).toBe('123456789012345')
   })
 
-  it(`stops accepting digits after ${MAX_DIGITS}`, () => {
-    expect(press('1234567890123456789').display).toBe('123456789012345')
-  })
-
-  it('toggles the sign of the current number', () => {
-    expect(press('12', { type: 'toggleSign' }).display).toBe('-12')
-    expect(press('12', { type: 'toggleSign' }, { type: 'toggleSign' }).display).toBe('12')
-  })
-
-  it('starts a negative second operand when ± is pressed right after an operator', () => {
-    expect(press('5', add, { type: 'toggleSign' }, '3').display).toBe('-3')
-  })
-
-  it('deletes the last character and falls back to 0', () => {
-    expect(press('123', { type: 'backspace' }).display).toBe('12')
-    expect(press('-5', { type: 'backspace' }).display).toBe('0')
-  })
-
-  it('does not edit a result with backspace', () => {
-    const state = press('2', add, '3', equals, succeed(5), { type: 'backspace' })
-    expect(state.display).toBe('5')
+  it('backspace removes the last character, then whole tokens', () => {
+    expect(getDisplay(type('12+34<'))).toBe('12 + 3')
+    expect(getDisplay(type('12+34<<<'))).toBe('12')
+    expect(getDisplay(type('√(<<'))).toBe('0')
   })
 
   it('clears everything', () => {
-    expect(press('5', add, '3', { type: 'clear' })).toEqual(initialState)
+    expect(type('2+3C')).toEqual(initialState)
   })
 })
 
-describe('binary operations', () => {
-  it('builds the request when = completes an expression', () => {
-    const state = press('12', add, '3', equals)
-    expect(state.request).toEqual({ operation: 'add', a: 12, b: 3 })
+describe('building expressions', () => {
+  it('sends the whole expression so the server can apply precedence', () => {
+    const state = type('2+3*4=')
+    expect(state.request).toBe('2 + 3 * 4')
+    expect(getDisplay(state)).toBe('2 + 3 × 4')
   })
 
   it('shows the result and the completed equation', () => {
-    const state = press('12', add, '3', equals, succeed(15))
-    expect(state.display).toBe('15')
+    const state = succeed(type('2+3*4='), 14)
+    expect(getDisplay(state)).toBe('14')
+    expect(getExpression(state)).toBe('2 + 3 × 4 =')
     expect(state.request).toBeNull()
-    expect(getExpression(state)).toBe('12 + 3 =')
   })
 
-  it('shows the pending operation while typing the second operand', () => {
-    expect(getExpression(press('12', add, '3'))).toBe('12 +')
+  it('supports parentheses and closes any left open on =', () => {
+    expect(type('(2+3)*4=').request).toBe('( 2 + 3 ) * 4')
+    expect(type('2*(3+(4=').request).toBe('2 * ( 3 + ( 4 ) )')
   })
 
-  it('replaces the operator when two are pressed in a row', () => {
-    const state = press('5', add, multiply, '2', equals)
-    expect(state.request).toEqual({ operation: 'multiply', a: 5, b: 2 })
+  it('only closes a parenthesis that is open and follows a value', () => {
+    expect(getDisplay(type('2)'))).toBe('2')
+    expect(getDisplay(type('(2+)'))).toBe('(2 +')
   })
 
-  it('evaluates the pending expression before chaining a new operator (no precedence)', () => {
-    let state = press('2', add, '3', multiply)
-    expect(state.request).toEqual({ operation: 'add', a: 2, b: 3 })
-
-    state = press('2', add, '3', multiply, succeed(5), '4', equals)
-    expect(state.request).toEqual({ operation: 'multiply', a: 5, b: 4 })
+  it('inserts × between adjacent operands', () => {
+    expect(type('2(3)=').request).toBe('2 * ( 3 )')
+    expect(type('(2)3=').request).toBe('( 2 ) * 3')
+    expect(type('5%2=').request).toBe('5 % * 2')
   })
 
-  it('continues from a result when an operator follows =', () => {
-    const state = press('2', add, '3', equals, succeed(5), multiply, '2', equals)
-    expect(state.request).toEqual({ operation: 'multiply', a: 5, b: 2 })
+  it('replaces an operator pressed right after another', () => {
+    expect(getDisplay(type('5+*'))).toBe('5 ×')
   })
 
-  it('starts a new number when typing after a result', () => {
-    const state = press('2', add, '3', equals, succeed(5), '7')
-    expect(state.display).toBe('7')
-    expect(getExpression(state)).toBe('')
+  it('treats minus as a sign at the start, after "(" and after × ÷ ^', () => {
+    expect(type('-5+3=').request).toBe('- 5 + 3')
+    expect(type('2*-3=').request).toBe('2 * - 3')
+    expect(getDisplay(type('2*-3'))).toBe('2 × −3')
+    expect(type('2^-1=').request).toBe('2 ^ - 1')
+    expect(type('(-2)=').request).toBe('( - 2 )')
   })
 
-  it('ignores = when there is nothing to evaluate', () => {
-    expect(press('5', equals).request).toBeNull()
-    expect(press('5', add, equals).request).toBeNull()
+  it('replaces a sign and its operator when another operator follows', () => {
+    expect(getDisplay(type('2*-+'))).toBe('2 +')
+  })
+
+  it('ignores operators that cannot follow the previous token', () => {
+    expect(getDisplay(type('*'))).toBe('0')
+    expect(getDisplay(type('(*'))).toBe('(')
+    expect(getDisplay(type('%'))).toBe('0')
+  })
+
+  it('ignores = for incomplete or trivial expressions', () => {
+    expect(type('2+=').request).toBeNull()
+    expect(type('5=').request).toBeNull()
+    expect(type('=').request).toBeNull()
+  })
+
+  it(`stops accepting input beyond ${MAX_EXPRESSION_LENGTH} characters`, () => {
+    const state = type('1+'.repeat(MAX_EXPRESSION_LENGTH))
+    expect(state.tokens.join(' ').length).toBeLessThanOrEqual(MAX_EXPRESSION_LENGTH)
   })
 
   it('ignores key presses while a request is in flight', () => {
-    const inFlight = press('2', add, '3', equals)
-    expect(calculatorReducer(inFlight, digit('9'))).toBe(inFlight)
-  })
-
-  it('rounds floating-point noise in the display', () => {
-    expect(press('0.1', add, '0.2', equals, succeed(0.1 + 0.2)).display).toBe('0.3')
+    const inFlight = type('2+3=')
+    expect(calculatorReducer(inFlight, { type: 'digit', digit: '9' })).toBe(inFlight)
   })
 })
 
-describe('unary operations', () => {
-  it('applies square root to the displayed number', () => {
-    let state = press('9', { type: 'unaryOperator', op: 'sqrt' })
-    expect(state.request).toEqual({ operation: 'sqrt', a: 9 })
-    state = calculatorReducer(state, succeed(3))
-    expect(state.display).toBe('3')
+describe('square root and percent', () => {
+  it('works as a prefix: √ then a number', () => {
+    expect(type('√9+1=').request).toBe('sqrt 9 + 1')
+    expect(getDisplay(type('√9+1'))).toBe('√9 + 1')
   })
 
-  it('uses a percentage result as the second operand', () => {
-    const state = press('150', multiply, '20', { type: 'unaryOperator', op: 'percentage' }, succeed(0.2), equals)
-    expect(state.request).toEqual({ operation: 'multiply', a: 150, b: 0.2 })
+  it('works after a number, applying to that number', () => {
+    expect(type('2+9√=').request).toBe('2 + sqrt 9')
+  })
+
+  it('wraps a parenthesized group or percentage', () => {
+    expect(type('(9+7)√=').request).toBe('sqrt ( 9 + 7 )')
+    expect(type('20%√=').request).toBe('sqrt ( 20 % )')
+  })
+
+  it('does not allow a sign directly after √', () => {
+    expect(getDisplay(type('√-'))).toBe('√')
+  })
+
+  it('appends % to the preceding value', () => {
+    expect(type('150*20%=').request).toBe('150 * 20 %')
+  })
+})
+
+describe('after a result', () => {
+  const evaluated = succeed(type('2+3='), 5)
+
+  it('starts a new expression when a number is typed', () => {
+    const state = type('7', evaluated)
+    expect(getDisplay(state)).toBe('7')
+    expect(getExpression(state)).toBe('')
+  })
+
+  it('continues from the result when an operator is pressed', () => {
+    expect(type('*2=', evaluated).request).toBe('5 * 2')
+  })
+
+  it('applies √ and % to the result', () => {
+    expect(type('√=', evaluated).request).toBe('sqrt 5')
+    expect(type('%=', evaluated).request).toBe('5 %')
+  })
+
+  it('keeps a negative result usable as an operand', () => {
+    const negative = succeed(type('2-5='), -3)
+    expect(getDisplay(negative)).toBe('−3')
+    expect(type('*2=', negative).request).toBe('- 3 * 2')
+    expect(type('√=', negative).request).toBe('sqrt ( - 3 )')
+  })
+
+  it('rounds floating-point noise in the result', () => {
+    expect(getDisplay(succeed(type('.1+.2='), 0.1 + 0.2))).toBe('0.3')
+  })
+
+  it('does not let backspace edit the result', () => {
+    expect(getDisplay(type('<', evaluated))).toBe('5')
   })
 })
 
 describe('errors', () => {
-  const failed = press('5', { type: 'binaryOperator', op: 'divide' }, '0', equals, {
+  const failed = calculatorReducer(type('5/0='), {
     type: 'requestFailed',
     message: 'Division by zero is not allowed.',
   })
 
-  it('shows the error and resets the calculation', () => {
-    expect(failed.error).toBe('Division by zero is not allowed.')
-    expect(failed.pendingOp).toBeNull()
+  it('shows the error and keeps the expression for editing', () => {
+    expect(getDisplay(failed)).toBe('Division by zero is not allowed.')
+    expect(getExpression(failed)).toBe('5 ÷ 0')
     expect(failed.request).toBeNull()
   })
 
-  it('ignores operators until a new number is entered', () => {
-    expect(calculatorReducer(failed, add)).toBe(failed)
-  })
-
-  it('recovers when a digit is typed', () => {
-    const state = calculatorReducer(failed, digit('4'))
-    expect(state.error).toBeNull()
-    expect(state.display).toBe('4')
+  it('dismisses the error and edits the expression on the next key', () => {
+    const fixed = type('<2', failed)
+    expect(fixed.error).toBeNull()
+    expect(getDisplay(fixed)).toBe('5 ÷ 2')
+    expect(type('=', fixed).request).toBe('5 / 2')
   })
 })

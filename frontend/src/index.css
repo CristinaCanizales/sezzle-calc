@@ -108,7 +108,8 @@ body {
   font-size: 1rem;
   font-weight: 500;
   color: var(--text-muted);
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  text-align: right;
 }
 
 .display__value {
@@ -129,6 +130,10 @@ body {
 
 .display__value--small {
   font-size: 1.6rem;
+}
+
+.display__value--xsmall {
+  font-size: 1.25rem;
 }
 
 .display__value--error {

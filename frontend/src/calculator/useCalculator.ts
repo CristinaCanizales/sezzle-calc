@@ -1,7 +1,7 @@
 import { useEffect, useReducer } from 'react'
-import { ApiError, calculate } from '../api/calculatorClient'
+import { ApiError, evaluate } from '../api/calculatorClient'
 import { getErrorMessage } from '../strings'
-import { calculatorReducer, getExpression, initialState } from './calculatorReducer'
+import { calculatorReducer, getDisplay, getExpression, initialState } from './calculatorReducer'
 import { keyToAction } from './keyboard'
 
 /** Connects the pure calculator reducer to the API and the physical keyboard. */
@@ -13,7 +13,7 @@ export function useCalculator() {
     if (!request) return
     const controller = new AbortController()
 
-    calculate(request, controller.signal)
+    evaluate(request, controller.signal)
       .then((result) => {
         if (!controller.signal.aborted) dispatch({ type: 'requestSucceeded', result })
       })
@@ -43,6 +43,7 @@ export function useCalculator() {
   return {
     state,
     dispatch,
+    display: getDisplay(state),
     expression: getExpression(state),
     loading: request !== null,
   }

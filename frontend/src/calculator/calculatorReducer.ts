@@ -1,195 +1,236 @@
-import {
-  OPERATION_SYMBOLS,
-  UNARY_OPERATIONS,
-  type BinaryOperation,
-  type CalculateRequest,
-  type UnaryOperation,
-} from '../types'
+import { OPERATOR_SYMBOLS, type Operator } from '../types'
 import { formatNumber } from '../utils/format'
 
 /**
- * Pocket-calculator state machine with immediate execution: each operation is
- * evaluated as soon as it is complete, so `2 + 3 × 4 =` gives 20 (no precedence).
+ * Keypad state machine that builds an arithmetic expression as a list of
+ * tokens. The server evaluates it with standard precedence, so
+ * `2 + 3 × 4 =` gives 14.
  *
- * The reducer is pure. Keys that need a calculation set `request`; the
- * useCalculator hook sends it and dispatches the outcome back.
+ * Input rules keep the expression well-formed while typing (e.g. `2 (`
+ * becomes `2 × (`), but the server remains the authority on validity.
+ *
+ * Tokens are API-ready ASCII: numbers ("12", "0.5", "1.2e+21"), operators
+ * (+ - * / ^), "(", ")", "sqrt" and "%".
  */
 export interface CalculatorState {
-  /** Text in the main display: the number being typed or the latest result. */
-  display: string
-  /** Left-hand operand waiting for `pendingOp`. */
-  accumulator: number | null
-  pendingOp: BinaryOperation | null
-  /** The next digit starts a new number instead of appending. */
-  overwrite: boolean
-  /** The display holds an operand entered after the last operator. */
-  operandReady: boolean
-  /** Completed equation shown above the result after `=`, e.g. "12 + 3 =". */
+  tokens: string[]
+  /** `tokens` holds a result; typing a number starts a new expression. */
+  evaluated: boolean
+  /** Completed equation shown above the result, e.g. "2 + 3 × 4 =". */
   lastEquation: string | null
   error: string | null
-  /** In-flight calculation; key presses are ignored while it is set. */
-  request: CalculateRequest | null
-  /** Operator to chain once the in-flight binary request resolves. */
-  nextOp: BinaryOperation | null
+  /** Expression being evaluated; key presses are ignored while it is set. */
+  request: string | null
 }
 
 export type CalculatorAction =
   | { type: 'digit'; digit: string }
   | { type: 'decimal' }
-  | { type: 'toggleSign' }
+  | { type: 'operator'; op: Operator }
+  | { type: 'openParen' }
+  | { type: 'closeParen' }
+  | { type: 'sqrt' }
+  | { type: 'percent' }
   | { type: 'backspace' }
   | { type: 'clear' }
-  | { type: 'binaryOperator'; op: BinaryOperation }
-  | { type: 'unaryOperator'; op: UnaryOperation }
   | { type: 'equals' }
   | { type: 'requestSucceeded'; result: number }
   | { type: 'requestFailed'; message: string }
 
 export const MAX_DIGITS = 15
+/** Kept below the server's 256-character limit. */
+export const MAX_EXPRESSION_LENGTH = 200
 
 export const initialState: CalculatorState = {
-  display: '0',
-  accumulator: null,
-  pendingOp: null,
-  overwrite: false,
-  operandReady: true,
+  tokens: [],
+  evaluated: false,
   lastEquation: null,
   error: null,
   request: null,
-  nextOp: null,
+}
+
+const OPERATORS = new Set<string>(['+', '-', '*', '/', '^'])
+
+const isNumber = (t: string | undefined) => t !== undefined && /^[0-9.]/.test(t)
+const isOperator = (t: string | undefined) => t !== undefined && OPERATORS.has(t)
+/** The token completes an operand, so a binary operator may follow it. */
+const endsValue = (t: string | undefined) => isNumber(t) || t === ')' || t === '%'
+const openParens = (tokens: string[]) =>
+  tokens.reduce((n, t) => n + (t === '(' ? 1 : t === ')' ? -1 : 0), 0)
+
+export function toApiExpression(tokens: string[]): string {
+  return tokens.join(' ')
 }
 
 export function calculatorReducer(state: CalculatorState, action: CalculatorAction): CalculatorState {
-  if (action.type === 'requestSucceeded') return applyResult(state, action.result)
-  if (action.type === 'requestFailed') return { ...initialState, error: action.message }
+  switch (action.type) {
+    case 'requestSucceeded':
+      return {
+        ...initialState,
+        tokens: resultTokens(action.result),
+        evaluated: true,
+        lastEquation: `${formatExpression(state.tokens)} =`,
+      }
+    case 'requestFailed':
+      // Keep the expression so the user can fix it instead of retyping it.
+      return { ...state, request: null, error: action.message }
+  }
 
   // Ignore input while waiting for the server.
   if (state.request) return state
-
   if (action.type === 'clear') return initialState
 
-  // After an error only starting a new number (or clearing) does anything.
-  if (state.error) {
-    if (action.type === 'digit' || action.type === 'decimal') {
-      return calculatorReducer(initialState, action)
-    }
-    return state
+  // Any key dismisses an error and continues editing the expression.
+  const current = state.error ? { ...state, error: null } : state
+  const tokens = editTokens(current, action)
+  if (tokens === null) {
+    return current
   }
+
+  if (action.type === 'equals') {
+    return { ...current, tokens, request: toApiExpression(tokens) }
+  }
+  if (toApiExpression(tokens).length > MAX_EXPRESSION_LENGTH) return current
+  return { ...current, tokens, evaluated: false, lastEquation: null }
+}
+
+/** Returns the new token list, or null if the key press does not apply. */
+function editTokens(state: CalculatorState, action: CalculatorAction): string[] | null {
+  const { evaluated } = state
+  // After a result, numbers and "(" start a new expression; operators continue from it.
+  const tokens = evaluated && ['digit', 'decimal', 'openParen'].includes(action.type) ? [] : state.tokens
+  const last = tokens.at(-1)
 
   switch (action.type) {
-    case 'digit':
-      return enterDigit(state, action.digit)
-    case 'decimal':
-      return enterDecimal(state)
-    case 'toggleSign':
-      return toggleSign(state)
-    case 'backspace':
-      return backspace(state)
-    case 'binaryOperator':
-      return chooseOperator(state, action.op)
-    case 'unaryOperator':
-      return {
-        ...state,
-        lastEquation: null,
-        request: { operation: action.op, a: Number(state.display) },
+    case 'digit': {
+      if (isNumber(last)) {
+        if (last === '0') return [...tokens.slice(0, -1), action.digit]
+        if (last!.replace(/\D/g, '').length >= MAX_DIGITS || last!.includes('e')) return null
+        return [...tokens.slice(0, -1), last + action.digit]
       }
-    case 'equals':
-      if (state.pendingOp === null || state.accumulator === null || !state.operandReady) return state
-      return {
-        ...state,
-        request: { operation: state.pendingOp, a: state.accumulator, b: Number(state.display) },
-        nextOp: null,
+      return [...withImplicitMultiply(tokens), action.digit]
+    }
+
+    case 'decimal': {
+      if (isNumber(last)) {
+        return last!.includes('.') || last!.includes('e') ? null : [...tokens.slice(0, -1), `${last}.`]
       }
+      return [...withImplicitMultiply(tokens), '0.']
+    }
+
+    case 'operator':
+      return addOperator(tokens, action.op)
+
+    case 'openParen':
+      return [...withImplicitMultiply(tokens), '(']
+
+    case 'closeParen':
+      return openParens(tokens) > 0 && endsValue(last) ? [...tokens, ')'] : null
+
+    case 'sqrt':
+      return addSqrt(tokens, evaluated)
+
+    case 'percent':
+      return endsValue(last) ? [...tokens, '%'] : null
+
+    case 'backspace': {
+      if (evaluated || last === undefined) return null
+      if (isNumber(last) && last.length > 1 && !last.includes('e')) {
+        return [...tokens.slice(0, -1), last.slice(0, -1)]
+      }
+      return tokens.slice(0, -1)
+    }
+
+    case 'equals': {
+      // Nothing to evaluate, or the expression is incomplete (e.g. "2 +").
+      if (evaluated || tokens.length < 2 || !endsValue(last)) return null
+      return [...tokens, ...Array<string>(openParens(tokens)).fill(')')]
+    }
+
+    default:
+      return null
   }
 }
 
-function startTyping(state: CalculatorState, display: string): CalculatorState {
-  return { ...state, display, overwrite: false, operandReady: true, lastEquation: null }
+/** Inserts "×" when a new operand directly follows a complete one: "2(" → "2 × (". */
+function withImplicitMultiply(tokens: string[]): string[] {
+  return endsValue(tokens.at(-1)) ? [...tokens, '*'] : tokens
 }
 
-function digitCount(display: string): number {
-  return display.replace(/[^0-9]/g, '').length
+function addOperator(tokens: string[], op: Operator): string[] | null {
+  const last = tokens.at(-1)
+  if (endsValue(last)) return [...tokens, op]
+
+  // Minus as a sign: at the start, after "(", or after × ÷ ^ (e.g. "2 × −3").
+  if (op === '-' && (last === undefined || last === '(' || last === '*' || last === '/' || last === '^')) {
+    return [...tokens, '-']
+  }
+
+  // Otherwise replace trailing operators, e.g. "2 × −" then "+" gives "2 +".
+  let trimmed = tokens
+  while (isOperator(trimmed.at(-1))) trimmed = trimmed.slice(0, -1)
+  return endsValue(trimmed.at(-1)) ? [...trimmed, op] : null
 }
 
-function enterDigit(state: CalculatorState, digit: string): CalculatorState {
-  if (state.overwrite) return startTyping(state, digit)
-  if (state.display === '0') return startTyping(state, digit)
-  if (state.display === '-0') return startTyping(state, `-${digit}`)
-  if (digitCount(state.display) >= MAX_DIGITS) return state
-  return startTyping(state, state.display + digit)
+/**
+ * √ works both before and after its operand: "√ 9" and "9 √" both give √9.
+ * Applied after a parenthesized group or a percentage, it wraps it in parentheses.
+ */
+function addSqrt(tokens: string[], evaluated: boolean): string[] {
+  if (evaluated) {
+    return tokens.length === 1 ? ['sqrt', ...tokens] : ['sqrt', '(', ...tokens, ')']
+  }
+  const last = tokens.at(-1)
+  if (!endsValue(last)) return [...tokens, 'sqrt']
+
+  const start = operandStart(tokens)
+  const operand = tokens.slice(start)
+  const wrapped = operand.length === 1 || operand[0] === '(' ? operand : ['(', ...operand, ')']
+  return [...tokens.slice(0, start), 'sqrt', ...wrapped]
 }
 
-function enterDecimal(state: CalculatorState): CalculatorState {
-  if (state.overwrite) return startTyping(state, '0.')
-  if (state.display.includes('.')) return state
-  return startTyping(state, `${state.display}.`)
-}
-
-function toggleSign(state: CalculatorState): CalculatorState {
-  // Right after choosing an operator, ± starts a negative second operand.
-  if (state.pendingOp && !state.operandReady) return startTyping(state, '-0')
-
-  const display = state.display.startsWith('-') ? state.display.slice(1) : `-${state.display}`
-  // Keep `overwrite` so negating a result and then typing starts a new number.
-  return { ...state, display, operandReady: true, lastEquation: null }
-}
-
-function backspace(state: CalculatorState): CalculatorState {
-  // Results are not editable; only numbers being typed are.
-  if (state.overwrite) return state
-  const display = state.display.slice(0, -1)
-  return startTyping(state, display === '' || display === '-' ? '0' : display)
-}
-
-function chooseOperator(state: CalculatorState, op: BinaryOperation): CalculatorState {
-  // A complete expression is pending: evaluate it, then continue with `op`.
-  if (state.pendingOp && state.accumulator !== null && state.operandReady) {
-    return {
-      ...state,
-      request: { operation: state.pendingOp, a: state.accumulator, b: Number(state.display) },
-      nextOp: op,
+/** Index where the trailing operand starts, e.g. the "(" matching a final ")". */
+function operandStart(tokens: string[]): number {
+  let i = tokens.length - 1
+  while (tokens[i] === '%') i--
+  if (tokens[i] === ')') {
+    let depth = 0
+    for (; i >= 0; i--) {
+      if (tokens[i] === ')') depth++
+      if (tokens[i] === '(' && --depth === 0) break
     }
   }
-  // Pressing operators back to back replaces the previous one.
-  return {
-    ...state,
-    accumulator: state.pendingOp ? state.accumulator : Number(state.display),
-    pendingOp: op,
-    overwrite: true,
-    operandReady: false,
-    lastEquation: null,
-  }
+  while (tokens[i - 1] === 'sqrt') i--
+  return i
 }
 
-function applyResult(state: CalculatorState, result: number): CalculatorState {
-  const { request } = state
-  if (!request) return state
-  const display = formatNumber(result)
-  const done = { ...state, display, overwrite: true, request: null, nextOp: null }
-
-  if (UNARY_OPERATIONS.includes(request.operation)) {
-    // The result becomes the current operand, e.g. "150 × 20 % =" → 150 × 0.2.
-    return { ...done, operandReady: true }
-  }
-
-  const op = request.operation as BinaryOperation
-  if (state.nextOp) {
-    // The displayed (rounded) value is what the user sees, so chain from it.
-    return { ...done, accumulator: Number(display), pendingOp: state.nextOp, operandReady: false }
-  }
-  return {
-    ...done,
-    accumulator: null,
-    pendingOp: null,
-    operandReady: true,
-    lastEquation: `${formatNumber(request.a)} ${OPERATION_SYMBOLS[op]} ${formatNumber(request.b ?? 0)} =`,
-  }
+function resultTokens(result: number): string[] {
+  const text = formatNumber(result)
+  return text.startsWith('-') ? ['-', text.slice(1)] : [text]
 }
 
-/** Secondary display line: the pending operation or the last completed equation. */
+const TOKEN_SYMBOLS: Record<string, string> = { ...OPERATOR_SYMBOLS, sqrt: '√' }
+
+/** Human-readable expression, e.g. ["2","*","-","3"] → "2 × −3". */
+export function formatExpression(tokens: string[]): string {
+  return tokens
+    .map((token, i) => {
+      const symbol = TOKEN_SYMBOLS[token] ?? token
+      // Binary operators get spaces; signs, parentheses, √ and % stay attached.
+      return isOperator(token) && endsValue(tokens[i - 1]) ? ` ${symbol} ` : symbol
+    })
+    .join('')
+    .trim()
+}
+
+/** Main display text: the error, the expression being typed, or the result. */
+export function getDisplay(state: CalculatorState): string {
+  if (state.error) return state.error
+  return state.tokens.length ? formatExpression(state.tokens) : '0'
+}
+
+/** Secondary line: the finished equation after "=", or the expression an error refers to. */
 export function getExpression(state: CalculatorState): string {
-  if (state.pendingOp && state.accumulator !== null) {
-    return `${formatNumber(state.accumulator)} ${OPERATION_SYMBOLS[state.pendingOp]}`
-  }
+  if (state.error) return formatExpression(state.tokens)
   return state.lastEquation ?? ''
 }

@@ -16,9 +16,8 @@ const en = {
   shortcuts: {
     label: 'Keyboard:',
     groups: [
-      { keys: ['0–9', '.', '+', '-', '*', '/', '^', '%'], action: '' },
+      { keys: ['0–9', '.', '+', '-', '*', '/', '^', '%', '(', ')'], action: '' },
       { keys: ['R'], action: '√' },
-      { keys: ['N'], action: '±' },
       { keys: ['Enter'], action: '=' },
       { keys: ['Backspace'], action: '' },
       { keys: ['Esc'], action: 'clear' },
@@ -33,11 +32,12 @@ const en = {
   keys: {
     clear: { label: 'AC', ariaLabel: 'Clear' },
     backspace: { label: '⌫', ariaLabel: 'Backspace' },
+    openParen: { label: '(', ariaLabel: 'Open parenthesis' },
+    closeParen: { label: ')', ariaLabel: 'Close parenthesis' },
     percentage: { label: '%', ariaLabel: 'Percent' },
     divide: { label: '÷', ariaLabel: 'Divide' },
     sqrt: { label: '√', ariaLabel: 'Square root' },
     power: { label: 'xʸ', ariaLabel: 'Power' },
-    toggleSign: { label: '±', ariaLabel: 'Toggle sign' },
     multiply: { label: '×', ariaLabel: 'Multiply' },
     subtract: { label: '−', ariaLabel: 'Subtract' },
     add: { label: '+', ariaLabel: 'Add' },
@@ -49,6 +49,7 @@ const en = {
    * server's English `message`, so errors can be translated too.
    */
   errors: {
+    INVALID_EXPRESSION: 'That expression is not valid. Check it and try again.',
     DIVISION_BY_ZERO: 'Division by zero is not allowed.',
     NEGATIVE_SQUARE_ROOT: 'Cannot take the square root of a negative number.',
     RESULT_OUT_OF_RANGE: 'The result is undefined or too large to represent.',
