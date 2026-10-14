@@ -56,6 +56,30 @@ npm run lint         # oxlint
 npm run build        # type-check + production build
 ```
 
+### Coverage report
+
+```bash
+# Backend: summary per function, plus an HTML report at backend/coverage.html
+cd backend
+go test -coverprofile=coverage.out ./internal/...
+go tool cover -func=coverage.out
+go tool cover -html=coverage.out -o coverage.html
+
+# Frontend: table in the terminal, plus an HTML report at frontend/coverage/index.html
+cd frontend
+npm run coverage
+```
+
+Results as of the latest commit:
+
+| Area | Statements | Lines | Branches |
+|---|---|---|---|
+| Backend `internal/calculator` (parser + operations) | 96.2% | — | — |
+| Backend `internal/api` (HTTP handlers, middleware) | 96.8% | — | — |
+| Frontend (all of `src/`) | 95.7% | 99.3% | 94.8% |
+
+Go reports statement coverage only. `cmd/server/main.go` is left out because it only wires up the server, timeouts and shutdown signals, and has no logic to unit-test.
+
 ---
 
 ## Project structure
@@ -258,7 +282,8 @@ Tests focus on behavior and edge cases rather than coverage numbers.
     - behavior after a result;
     - fixing an expression after an error.
   - `Calculator.test.tsx`: integration tests that render the real components with only the API client mocked. They cover precedence, parentheses, percentages, server and network errors, and keyboard input, including the focused-button-plus-Enter case.
-  - Smaller unit tests for the API client, the number formatter, the key mapping and the error-message lookup.
+  - Smaller unit tests for the page shell, the API client, the number formatter, the key mapping and the error-message lookup.
+- **Coverage:** about 96% of backend statements and 99% of frontend lines; see [Coverage report](#coverage-report) for the breakdown and how to regenerate it.
 - **Not included:** snapshot tests, styling tests, and browser end-to-end tests (see below).
 
 ## Trade-offs and future work

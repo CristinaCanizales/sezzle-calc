@@ -14,5 +14,12 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.{ts,tsx}'],
+      // Entry point and test helpers have no logic worth measuring.
+      exclude: ['src/main.tsx', 'src/test/**', 'src/**/*.test.{ts,tsx}'],
+      reporter: ['text', 'html', 'json-summary'],
+    },
   },
 })

@@ -12,3 +12,7 @@ backend/bin/
 .vscode/
 .idea/
 .DS_Store
+
+# Coverage output
+backend/coverage.out
+backend/coverage.html
