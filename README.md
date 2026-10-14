@@ -13,6 +13,8 @@ A keypad calculator with a **React + TypeScript** frontend and a **Go** REST API
 - **Layout and accessibility:** responsive down to small phones; keys have accessible labels and keyboard shortcuts.
 - **Tests:** unit and integration tests on both the backend and the frontend.
 
+This project was built with an AI coding assistant (Claude Code). [PROMPTS.md](PROMPTS.md) lists the prompts used, in order.
+
 ---
 
 ## Quick start (Docker)
@@ -91,15 +93,23 @@ backend/
     calculator.go                  Single operations + domain errors (no HTTP)
     expression.go                  Tokenizer + recursive-descent parser for expressions
   internal/api/                    Routing, request validation, error mapping, middleware
-frontend/src/
-  api/calculatorClient.ts          Typed fetch wrapper; normalizes every failure to ApiError
-  calculator/calculatorReducer.ts  Pure state machine that builds expressions from key presses
-  calculator/useCalculator.ts      Connects the reducer to the API and the keyboard
-  calculator/keyboard.ts           Maps keyboard keys to calculator actions
-  components/                      Calculator, Display, Keypad
-  utils/format.ts                  Result formatting / float rounding
-  messages.ts                       All user-facing text (labels, aria-labels, error messages)
-docker-compose.yml                 backend (distroless) + frontend (nginx, proxies /api)
+  Dockerfile                       Static Go binary in a distroless, non-root image
+frontend/
+  src/
+    App.tsx                        Page shell: header, title, keyboard-shortcut hints
+    api/calculatorClient.ts        Typed fetch wrapper; normalizes every failure to ApiError
+    calculator/calculatorReducer.ts  Pure state machine that builds expressions from key presses
+    calculator/useCalculator.ts    Connects the reducer to the API and the keyboard
+    calculator/keyboard.ts         Maps keyboard keys to calculator actions
+    components/                    Calculator, Display, Keypad
+    utils/format.ts                Result formatting / float rounding
+    messages.ts                    All user-facing text (labels, aria-labels, error messages)
+    types.ts                       Operator type and display symbols
+  nginx.conf                       Serves the built app and proxies /api to the backend
+  Dockerfile                       Node build stage + nginx runtime
+docker-compose.yml                 Runs backend (:8080) and frontend (:3000) together
+docs/                              Screenshots used in this README
+PROMPTS.md                         Prompts used to build the project
 ```
 
 ---
@@ -227,9 +237,10 @@ curl -s -X POST http://localhost:8080/api/v1/calculate \
 | **Negative numbers** | `−` acts as a sign at the start of an expression, after `(` and after `×`, `÷` or `^`, as in `2 × −3`. As in standard notation, `−2 ^ 2` = −4; use `(−2) ^ 2` to get 4. |
 | **Percentage** | Works like the iOS calculator. After `+` or `−`, `x%` is x percent of the value on its left, so `50 + 10%` = 55 and `200 − 10%` = 180. Anywhere else, `x%` means x / 100, so `150 × 20%` = 30 and `20%` alone is 0.2. |
 | **Square root** | Press `√` before or after its operand: `√ 9` and `9 √` both give `√9`. After a parenthesized group or a percentage, it wraps the whole group. A negative operand returns an error. |
-| **Input help** | `×` is inserted between adjacent operands (`2(3)` becomes `2 × (3)`). Any open parentheses are closed when you press `=`. Keys that cannot apply at that point are ignored, for example `)` with no open `(` or `×` right after `(`. Pressing an operator right after another replaces it. |
+| **Input help** | `×` is inserted between adjacent operands (`2(3)` becomes `2 × (3)`). Any open parentheses are closed when you press `=`. Keys that cannot apply at that point are ignored, for example `)` with no open `(` or `×` right after `(`. Pressing an operator right after another replaces it. `=` does nothing if the expression is incomplete (for example, it ends in an operator) or is a single number. |
 | **After a result** | A digit starts a new expression. An operator, `%` or `√` continues from the result. |
 | **Errors** | The message replaces the main display, and the expression stays above it. The next key dismisses the error and continues editing, so you can fix `5 ÷ 0` with backspace instead of retyping it. |
+| **While calculating** | The display dims and key presses are ignored until the server responds, so a second request can't race the first. |
 | **Floating point** | The API returns full `float64` results. The display rounds to 12 significant digits, so `0.1 + 0.2` shows `0.3`. Very large or very small values switch to exponential notation. |
 | **Limits** | Up to 15 digits per number and 200 characters per expression. The server accepts up to 256. |
 
@@ -250,6 +261,7 @@ curl -s -X POST http://localhost:8080/api/v1/calculate \
 
 ## Design decisions
 
+- **An expression keypad instead of a pocket calculator.** The first version ran each operation as soon as it was complete, like a basic pocket calculator, so `2 + 3 × 4` gave 20. It was changed to build the whole expression and evaluate it with standard precedence, which is what most people expect today. As a result, the keypad has `(` and `)` keys instead of `±`, and `−` doubles as the minus sign (`2 × −3`).
 - **Expressions are evaluated on the server.** The frontend builds the expression and sends it whole. The Go API parses and evaluates it, so the math rules live in one place and are tested once. The alternative was to apply precedence in the browser and call `/calculate` once per operation. That would duplicate the parsing logic and need several round trips for each `=`.
 - **A hand-written recursive-descent parser.** The grammar is small: four precedence levels, plus parentheses, `√` and `%`. The parser is about 350 lines with no dependencies, gives precise error positions, and is easy to read and test. It builds an AST before evaluating anything, so a syntax error anywhere is reported before a math error such as division by zero. Evaluating every node through `Calculate` means both endpoints share the same domain rules and errors. Input is limited to 256 characters, which also limits how deep the recursion can go.
 - **iOS-style percentages are a parser rule.** When the parser sees `a + b%` or `a - b%`, it rewrites it to `a + a × b%` before evaluating. The rule therefore needs the left operand, and the frontend sends `%` exactly as typed. It only applies when the percentage is the whole right-hand side (`50 + 10% × 2` is 50.2), which keeps the rule predictable.
@@ -258,10 +270,12 @@ curl -s -X POST http://localhost:8080/api/v1/calculate \
 - **400 vs 422.** 400 means the request is malformed or cannot be parsed. 422 means it is well-formed but the math is undefined.
 - **Go standard library only.** `net/http` from Go 1.22 is enough for three routes. The middleware covers panic recovery and structured request logging (`log/slog`). The server has timeouts and shuts down gracefully on SIGTERM.
 - **The keypad is a pure reducer.** `calculatorReducer.ts` turns key presses into API-ready tokens. The input rules (implicit `×`, valid positions for signs, `√` before or after its operand, auto-closing parentheses) prevent most invalid expressions, but the server still validates everything. The reducer has no side effects: pressing `=` sets `state.request`, and the `useCalculator` hook sends it and dispatches the result back. This lets almost all frontend behavior be tested without rendering or mocks.
+- **Errors keep the expression.** After an error such as `5 ÷ 0`, the expression stays on screen and the next key continues editing it. With full expressions, making users retype everything after a typo would be frustrating.
 - **Keyboard and on-screen keys use the same actions.** `keyboard.ts` maps keys to the same reducer actions as the buttons. `preventDefault` stops `Enter` from also clicking whichever button has focus.
 - **All user-facing text is in `messages.ts`.** Labels, accessible names, keyboard hints and error messages live in one typed object. A translation is just another object of the same `Messages` type, and a missing key is a compile error. The UI picks error text by the API's `code` rather than showing the server's English `message`, so errors can be translated too.
+- **Styling.** Plain CSS with custom properties, in a Sezzle-inspired look: the brand purple (`#8333d4`), lavender surfaces, rounded cards and the Inter font. A single breakpoint at 480px makes the keypad fill the screen on phones and hides the keyboard hints there.
 - **No CORS setup.** The browser always calls `/api/...` on its own origin. Vite's dev proxy forwards it in development, and nginx forwards it in Docker.
-- **Minimal dependencies.** No UI kit, state library or CSS framework. The Docker images are a distroless static Go image (non-root, about 10 MB) and nginx serving the built frontend.
+- **Minimal dependencies.** No UI kit, state library or CSS framework. In Docker, the backend runs as a static binary in a distroless, non-root image (about 10 MB), and nginx serves the built frontend.
 
 ## Testing approach
 
