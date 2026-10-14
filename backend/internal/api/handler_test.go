@@ -43,7 +43,7 @@ func TestCalculateSuccess(t *testing.T) {
 			if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
 				t.Errorf("Content-Type = %q, want application/json", ct)
 			}
-			var resp calculateResponse
+			var resp resultResponse
 			if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 				t.Fatalf("invalid JSON response: %v", err)
 			}
@@ -70,7 +70,7 @@ func TestCalculateErrors(t *testing.T) {
 		{"unknown field", http.MethodPost, `{"operation":"add","a":1,"b":2,"c":3}`, 400, CodeInvalidRequest},
 		{"operand is a string", http.MethodPost, `{"operation":"add","a":"1","b":2}`, 400, CodeInvalidRequest},
 		{"multiple JSON objects", http.MethodPost, `{"operation":"add","a":1,"b":2}{}`, 400, CodeInvalidRequest},
-		{"body too large", http.MethodPost, `{"operation":"add","a":1,"b":2,"x":"` + strings.Repeat("x", 2000) + `"}`, 400, CodeInvalidRequest},
+		{"body too large", http.MethodPost, `{"operation":"add","a":1,"b":2,"x":"` + strings.Repeat("x", 5000) + `"}`, 400, CodeInvalidRequest},
 		{"missing operation", http.MethodPost, `{"a":1,"b":2}`, 400, CodeInvalidRequest},
 		{"missing a", http.MethodPost, `{"operation":"add","b":2}`, 400, CodeMissingOperand},
 		{"null a", http.MethodPost, `{"operation":"add","a":null,"b":2}`, 400, CodeMissingOperand},
@@ -84,6 +84,76 @@ func TestCalculateErrors(t *testing.T) {
 			rec := doRequest(t, tt.method, "/api/v1/calculate", tt.body)
 			assertError(t, rec, tt.wantStatus, tt.wantCode)
 		})
+	}
+}
+
+func TestEvaluateSuccess(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want float64
+	}{
+		{"precedence", `{"expression":"2 + 3 * 4"}`, 14},
+		{"parentheses", `{"expression":"(2 + 3) * 4"}`, 20},
+		{"unicode operators", `{"expression":"6 × 7 ÷ 2 − 1"}`, 20},
+		{"percent and sqrt", `{"expression":"150 * 20% + sqrt(9)"}`, 33},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := doRequest(t, http.MethodPost, "/api/v1/evaluate", tt.body)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body)
+			}
+			var resp resultResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("invalid JSON response: %v", err)
+			}
+			if resp.Result != tt.want {
+				t.Errorf("result = %v, want %v", resp.Result, tt.want)
+			}
+		})
+	}
+}
+
+func TestEvaluateErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		method     string
+		body       string
+		wantStatus int
+		wantCode   string
+	}{
+		{"syntax error", http.MethodPost, `{"expression":"2 + )"}`, 400, CodeInvalidExpression},
+		{"unbalanced parentheses", http.MethodPost, `{"expression":"(2 + 3"}`, 400, CodeInvalidExpression},
+		{"too long", http.MethodPost, `{"expression":"` + strings.Repeat("1+", 200) + `1"}`, 400, CodeInvalidExpression},
+		{"missing expression", http.MethodPost, `{}`, 400, CodeInvalidRequest},
+		{"blank expression", http.MethodPost, `{"expression":"  "}`, 400, CodeInvalidRequest},
+		{"expression is a number", http.MethodPost, `{"expression":5}`, 400, CodeInvalidRequest},
+		{"unknown field", http.MethodPost, `{"expression":"1","a":1}`, 400, CodeInvalidRequest},
+		{"division by zero", http.MethodPost, `{"expression":"1 / (2 - 2)"}`, 422, CodeDivisionByZero},
+		{"negative square root", http.MethodPost, `{"expression":"sqrt(0 - 4)"}`, 422, CodeNegativeSquareRoot},
+		{"overflow", http.MethodPost, `{"expression":"10 ^ 400"}`, 422, CodeResultOutOfRange},
+		{"wrong method", http.MethodGet, ``, 405, CodeMethodNotAllowed},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := doRequest(t, tt.method, "/api/v1/evaluate", tt.body)
+			assertError(t, rec, tt.wantStatus, tt.wantCode)
+		})
+	}
+}
+
+func TestEvaluateSyntaxErrorMessageIncludesPosition(t *testing.T) {
+	rec := doRequest(t, http.MethodPost, "/api/v1/evaluate", `{"expression":"2 + )"}`)
+	var resp errorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if want := `Invalid expression: unexpected ")" at position 5.`; resp.Error.Message != want {
+		t.Errorf("message = %q, want %q", resp.Error.Message, want)
 	}
 }
 

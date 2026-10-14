@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"sezzle-calculator/backend/internal/calculator"
 )
 
-const maxBodyBytes = 1 << 10 // a valid request is well under 100 bytes
+// Fits the longest allowed expression (256 characters, some multi-byte) with room to spare.
+const maxBodyBytes = 2 << 10
 
 type calculateRequest struct {
 	Operation calculator.Operation `json:"operation"`
@@ -21,7 +23,12 @@ type calculateRequest struct {
 	B *float64 `json:"b"`
 }
 
-type calculateResponse struct {
+type evaluateRequest struct {
+	Expression string `json:"expression"`
+}
+
+// resultResponse is the success body for both calculation endpoints.
+type resultResponse struct {
 	Result float64 `json:"result"`
 }
 
@@ -29,6 +36,7 @@ type calculateResponse struct {
 func NewRouter() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/calculate", handleCalculate)
+	mux.HandleFunc("/api/v1/evaluate", handleEvaluate)
 	mux.HandleFunc("/api/health", handleHealth)
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "Resource not found.")
@@ -48,8 +56,8 @@ func handleCalculate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req, err := decodeCalculateRequest(w, r)
-	if err != nil {
+	var req calculateRequest
+	if err := decodeJSON(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		return
 	}
@@ -68,38 +76,61 @@ func handleCalculate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, code, message)
 		return
 	}
-	writeJSON(w, http.StatusOK, calculateResponse{Result: result})
+	writeJSON(w, http.StatusOK, resultResponse{Result: result})
 }
 
-// decodeCalculateRequest strictly parses the body, returning user-facing errors.
-func decodeCalculateRequest(w http.ResponseWriter, r *http.Request) (calculateRequest, error) {
-	var req calculateRequest
+func handleEvaluate(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodPost) {
+		return
+	}
+
+	var req evaluateRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		return
+	}
+	if strings.TrimSpace(req.Expression) == "" {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, `Field "expression" is required.`)
+		return
+	}
+
+	result, err := calculator.Evaluate(req.Expression)
+	if err != nil {
+		status, code, message := mapCalculatorError(err, "")
+		writeError(w, status, code, message)
+		return
+	}
+	writeJSON(w, http.StatusOK, resultResponse{Result: result})
+}
+
+// decodeJSON strictly parses the body into dst, returning user-facing errors.
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	dec.DisallowUnknownFields()
 
-	if err := dec.Decode(&req); err != nil {
+	if err := dec.Decode(dst); err != nil {
 		var typeErr *json.UnmarshalTypeError
 		var maxErr *http.MaxBytesError
 		switch {
 		case errors.As(err, &typeErr):
-			return req, fmt.Errorf("Field %q must be a %s.", typeErr.Field, expectedType(typeErr.Field))
+			return fmt.Errorf("Field %q must be a %s.", typeErr.Field, jsonTypeName(typeErr.Type.Kind()))
 		case errors.As(err, &maxErr):
-			return req, errors.New("Request body is too large.")
+			return errors.New("Request body is too large.")
 		case errors.Is(err, io.EOF):
-			return req, errors.New("Request body is required.")
+			return errors.New("Request body is required.")
 		default:
 			// Covers malformed JSON and unknown fields; the decoder's message is descriptive enough.
-			return req, fmt.Errorf("Request body is not valid: %s.", strings.TrimPrefix(err.Error(), "json: "))
+			return fmt.Errorf("Request body is not valid: %s.", strings.TrimPrefix(err.Error(), "json: "))
 		}
 	}
 	if dec.More() {
-		return req, errors.New("Request body must contain a single JSON object.")
+		return errors.New("Request body must contain a single JSON object.")
 	}
-	return req, nil
+	return nil
 }
 
-func expectedType(field string) string {
-	if field == "operation" {
+func jsonTypeName(kind reflect.Kind) string {
+	if kind == reflect.String {
 		return "string"
 	}
 	return "number"
@@ -110,6 +141,8 @@ func mapCalculatorError(err error, op calculator.Operation) (status int, code, m
 	case errors.Is(err, calculator.ErrUnsupportedOperation):
 		return http.StatusBadRequest, CodeUnsupportedOperation, fmt.Sprintf(
 			"Unsupported operation %q. Supported operations: add, subtract, multiply, divide, power, sqrt, percentage.", op)
+	case errors.Is(err, calculator.ErrInvalidExpression):
+		return http.StatusBadRequest, CodeInvalidExpression, fmt.Sprintf("Invalid expression: %s.", err)
 	case errors.Is(err, calculator.ErrMissingOperand):
 		return http.StatusBadRequest, CodeMissingOperand, fmt.Sprintf(`Field "b" is required for operation %q.`, op)
 	case errors.Is(err, calculator.ErrDivisionByZero):

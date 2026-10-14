@@ -11,6 +11,7 @@ const (
 	CodeInvalidRequest       = "INVALID_REQUEST"
 	CodeMissingOperand       = "MISSING_OPERAND"
 	CodeUnsupportedOperation = "UNSUPPORTED_OPERATION"
+	CodeInvalidExpression    = "INVALID_EXPRESSION"
 	CodeDivisionByZero       = "DIVISION_BY_ZERO"
 	CodeNegativeSquareRoot   = "NEGATIVE_SQUARE_ROOT"
 	CodeResultOutOfRange     = "RESULT_OUT_OF_RANGE"
