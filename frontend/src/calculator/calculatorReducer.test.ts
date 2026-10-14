@@ -151,6 +151,11 @@ describe('square root and percent', () => {
   it('appends % to the preceding value', () => {
     expect(type('150*20%=').request).toBe('150 * 20 %')
   })
+
+  it('sends a percentage after + or − as typed (the server applies the iOS rule)', () => {
+    expect(type('50+10%=').request).toBe('50 + 10 %')
+    expect(getDisplay(type('50+10%'))).toBe('50 + 10%')
+  })
 })
 
 describe('after a result', () => {

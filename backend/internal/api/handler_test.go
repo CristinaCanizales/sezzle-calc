@@ -97,6 +97,8 @@ func TestEvaluateSuccess(t *testing.T) {
 		{"parentheses", `{"expression":"(2 + 3) * 4"}`, 20},
 		{"unicode operators", `{"expression":"6 × 7 ÷ 2 − 1"}`, 20},
 		{"percent and sqrt", `{"expression":"150 * 20% + sqrt(9)"}`, 33},
+		{"iOS-style percent after +", `{"expression":"50 + 10%"}`, 55},
+		{"iOS-style percent after -", `{"expression":"200 - 10%"}`, 180},
 	}
 
 	for _, tt := range tests {

@@ -22,6 +22,7 @@ const SERVER_RESULTS: Record<string, number> = {
   '14 * 2': 28,
   '12 * 3': 36,
   '5 / 2': 2.5,
+  '50 + 10 %': 55,
 }
 
 async function fakeBackend(expression: string): Promise<number> {
@@ -80,6 +81,15 @@ describe('Calculator', () => {
     await press('equals')
 
     await waitFor(() => expect(display()).toHaveTextContent(/^4$/))
+  })
+
+  it('adds a percentage of the left side, like iOS (50 + 10% = 55)', async () => {
+    const { press, display } = setup()
+
+    await press('5', '0', 'add', '1', '0', 'percentage', 'equals')
+
+    await waitFor(() => expect(display()).toHaveTextContent(/^55$/))
+    expect(screen.getByText('50 + 10% =')).toBeInTheDocument()
   })
 
   it('continues from a result', async () => {

@@ -35,6 +35,8 @@ func (e *SyntaxError) Unwrap() error { return ErrInvalidExpression }
 //	primary    = number | "(" expression ")" | ("√" | "sqrt") primary
 //
 // Unary minus binds looser than "^", so -2^2 = -4 as in standard notation.
+// "x%" is x/100, except when it is the whole right operand of + or -, where
+// (as on iOS) it means x percent of the left side: 50 + 10% = 55.
 // Each operation is computed by Calculate, so domain rules (division by zero,
 // negative square roots, overflow) match the single-operation endpoint.
 // The whole expression is parsed before anything is evaluated, so syntax
@@ -254,9 +256,22 @@ func (p *parser) parseLeftAssoc(operand func() (node, error), ops ...rune) (node
 		if err != nil {
 			return nil, err
 		}
+		if (op == '+' || op == '-') && isPercentage(right) {
+			// As on iOS, b% after + or - is b percent of the left side: 50 + 10% = 55.
+			right = binaryNode{op: Multiply, left: left, right: right}
+		}
 		left = binaryNode{op: binaryOperations[op], left: left, right: right}
 	}
 	return left, nil
+}
+
+// isPercentage reports whether n is a percentage, possibly negated (10%, -10%).
+func isPercentage(n node) bool {
+	if neg, ok := n.(negateNode); ok {
+		n = neg.operand
+	}
+	u, ok := n.(unaryNode)
+	return ok && u.op == Percentage
 }
 
 func (p *parser) parseExpression() (node, error) {

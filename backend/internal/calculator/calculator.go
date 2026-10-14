@@ -50,8 +50,9 @@ var operations = map[Operation]operation{
 		}
 		return math.Sqrt(a), nil
 	}},
-	// Percentage converts a value to its fraction of 100 (20 -> 0.2), like the
-	// % key on most pocket calculators: "150 × 20 % =" yields 30.
+	// Percentage converts a value to its fraction of 100 (20 -> 0.2), so
+	// "150 × 20%" yields 30. Evaluate adds the iOS rule for + and -
+	// ("50 + 10%" = 55) on top of this.
 	Percentage: {unary: true, apply: func(a, _ float64) (float64, error) { return a / 100, nil }},
 }
 

@@ -31,10 +31,20 @@ func TestEvaluate(t *testing.T) {
 		{"2 ^ -1", 0.5},
 		{"+4", 4},
 
-		// Percentage (x% = x/100) and square root
+		// Percentage: x% = x/100, except after + or - where it is x percent of the left side
 		{"150 * 20%", 30},
-		{"50 + 10%", 50.1},
+		{"200 / 50%", 400},
+		{"20%", 0.2},
+		{"50 + 10%", 55},
+		{"200 - 10%", 180},
+		{"50 + -10%", 45},
+		{"50 + 10% + 10%", 60.5},
+		{"2 * 50 + 10%", 110},
+		{"(50 + 10%) * 2", 110},
+		{"50 + 10% * 2", 50.2}, // the right operand is 10% * 2, not a bare percentage
 		{"200%%", 0.02},
+
+		// Square root
 		{"√9 + 1", 4},
 		{"√(9 + 7)", 4},
 		{"sqrt 16", 4},
