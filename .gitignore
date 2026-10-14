@@ -1,0 +1,14 @@
+# Frontend
+node_modules/
+dist/
+coverage/
+*.local
+
+# Backend
+backend/bin/
+*.exe
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
